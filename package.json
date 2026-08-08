@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node backend/server.js",
     "test": "node --test",
-    "check": "node --check backend/server.js && node --check backend/security.js && node --check backend/storage.js && node --check public/app.js && npm test"
+    "check": "node --check backend/server.js && node --check backend/security.js && node --check backend/storage.js && node --check public/app.js && python3 -m py_compile transfer.py && bash -n deploy/install.sh && npm test"
   },
   "engines": {
     "node": ">=20"

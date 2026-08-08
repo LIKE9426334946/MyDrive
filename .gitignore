@@ -2,6 +2,9 @@ node_modules/
 .env
 *.log
 .DS_Store
+__pycache__/
+*.py[cod]
+/upload/
 
 # User files and temporary uploads must never be committed.
 data/uploads/*

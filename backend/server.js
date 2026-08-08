@@ -30,11 +30,13 @@ const PORT = Number.parseInt(process.env.PORT || '3025', 10);
 const APP_USERNAME = process.env.APP_USERNAME || 'noart';
 const APP_PASSWORD = process.env.APP_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET;
+const KAGGLE_UPLOAD_TOKEN = process.env.KAGGLE_UPLOAD_TOKEN || '';
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
 const STORAGE_ROOT = path.resolve(process.env.STORAGE_ROOT || path.join(__dirname, '..', 'data', 'uploads'));
 const TEMP_ROOT = path.resolve(process.env.TEMP_ROOT || path.join(__dirname, '..', 'data', 'tmp'));
-const MAX_UPLOAD_BYTES = Number.parseInt(process.env.MAX_UPLOAD_BYTES || String(5 * 1024 ** 3), 10);
+const MAX_UPLOAD_BYTES = Number.parseInt(process.env.MAX_UPLOAD_BYTES || String(100 * 1024 ** 3), 10);
 const MAX_UPLOAD_FILES = Number.parseInt(process.env.MAX_UPLOAD_FILES || '20', 10);
+const REQUEST_TIMEOUT_MS = Number.parseInt(process.env.REQUEST_TIMEOUT_MS || String(24 * 60 * 60 * 1000), 10);
 const SESSION_COOKIE = 'mydrive_session';
 
 if (!APP_PASSWORD) throw new Error('APP_PASSWORD 环境变量未设置');
@@ -44,6 +46,9 @@ if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65_535) throw new Error('PORT 配置不正确');
 if (!Number.isSafeInteger(MAX_UPLOAD_BYTES) || MAX_UPLOAD_BYTES <= 0) {
   throw new Error('MAX_UPLOAD_BYTES 配置不正确');
+}
+if (!Number.isSafeInteger(REQUEST_TIMEOUT_MS) || REQUEST_TIMEOUT_MS < 300_000) {
+  throw new Error('REQUEST_TIMEOUT_MS 配置不正确');
 }
 
 const app = express();
@@ -176,6 +181,116 @@ app.post('/api/logout', requireSameOriginWrite, (request, response) => {
   response.status(204).end();
 });
 
+function authenticateUpload(request, response, next) {
+  const authorization = request.get('Authorization') || '';
+  if (authorization) {
+    const token = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+    if (!KAGGLE_UPLOAD_TOKEN || !constantTimeEqual(token, KAGGLE_UPLOAD_TOKEN)) {
+      response.status(401).json({ status: 'error', message: 'invalid token' });
+      return;
+    }
+    request.uploadAuthMode = 'token';
+    next();
+    return;
+  }
+
+  const session = getSession(request);
+  if (!session) {
+    response.status(401).json({ error: '登录已失效，请重新登录', code: 'UNAUTHORIZED' });
+    return;
+  }
+  if (request.get('X-Requested-With') !== 'MyDrive') {
+    response.status(403).json({ error: '请求来源验证失败', code: 'FORBIDDEN' });
+    return;
+  }
+  request.session = session;
+  request.uploadAuthMode = 'session';
+  next();
+}
+
+function uploadErrorResponse(request, response, status, message, code) {
+  if (request.uploadAuthMode === 'token') {
+    response.status(status).json({ status: 'error', message });
+  } else {
+    response.status(status).json({ error: message, code });
+  }
+}
+
+const upload = multer({
+  dest: TEMP_ROOT,
+  limits: {
+    fileSize: MAX_UPLOAD_BYTES,
+    files: MAX_UPLOAD_FILES,
+    fields: 10,
+    parts: MAX_UPLOAD_FILES + 10
+  }
+});
+
+app.post('/api/upload', authenticateUpload, upload.fields([
+  { name: 'files', maxCount: MAX_UPLOAD_FILES },
+  { name: 'file', maxCount: 1 }
+]), async (request, response) => {
+  const uploadedFiles = [
+    ...(request.files?.files || []),
+    ...(request.files?.file || [])
+  ];
+  const tokenUpload = request.uploadAuthMode === 'token';
+  const requestedFormPath = typeof request.body?.path === 'string' ? request.body.path.trim() : '';
+  if (tokenUpload && requestedFormPath && requestedFormPath !== 'kaggle') {
+    await Promise.all(uploadedFiles.map((file) => fs.rm(file.path, { force: true })));
+    uploadErrorResponse(request, response, 400, 'path must be kaggle', 'INVALID_PATH');
+    return;
+  }
+
+  const targetPath = tokenUpload ? 'kaggle' : normalizeVirtualPath(request.query.path || '');
+  const targetDirectory = resolveVirtualPath(STORAGE_ROOT, targetPath);
+  if (tokenUpload) await fs.mkdir(targetDirectory, { recursive: true, mode: 0o700 });
+  const targetStats = await fs.lstat(targetDirectory).catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!targetStats?.isDirectory() || targetStats.isSymbolicLink()) {
+    await Promise.all(uploadedFiles.map((file) => fs.rm(file.path, { force: true })));
+    uploadErrorResponse(request, response, 404, '上传目标文件夹不存在', 'NOT_FOUND');
+    return;
+  }
+  if (!uploadedFiles.length) {
+    uploadErrorResponse(request, response, 400, '请选择需要上传的文件', 'NO_FILES');
+    return;
+  }
+
+  const stored = [];
+  try {
+    for (const file of uploadedFiles) {
+      let destination;
+      while (true) {
+        destination = await chooseUniqueDestination(targetDirectory, file.originalname);
+        try {
+          await fs.link(file.path, destination.absolutePath);
+          break;
+        } catch (error) {
+          if (error.code !== 'EEXIST') throw error;
+        }
+      }
+      await fs.rm(file.path, { force: true });
+      stored.push({
+        name: destination.name,
+        path: joinVirtualPath(targetPath, destination.name),
+        size: file.size,
+        kind: 'file'
+      });
+    }
+  } finally {
+    await Promise.all(uploadedFiles.map((file) => fs.rm(file.path, { force: true }).catch(() => {})));
+  }
+
+  if (tokenUpload) {
+    response.status(201).json({ status: 'success', filename: stored[0].name });
+  } else {
+    response.status(201).json({ files: stored });
+  }
+});
+
 app.use('/api', requireAuthentication);
 
 app.get('/api/files', async (request, response) => {
@@ -220,60 +335,6 @@ app.post('/api/folders', requireSameOriginWrite, async (request, response) => {
     throw error;
   }
   response.status(201).json({ name, path: joinVirtualPath(parentPath, name), kind: 'folder' });
-});
-
-const upload = multer({
-  dest: TEMP_ROOT,
-  limits: {
-    fileSize: MAX_UPLOAD_BYTES,
-    files: MAX_UPLOAD_FILES,
-    fields: 10,
-    parts: MAX_UPLOAD_FILES + 10
-  }
-});
-
-app.post('/api/upload', requireSameOriginWrite, upload.array('files', MAX_UPLOAD_FILES), async (request, response) => {
-  const targetPath = normalizeVirtualPath(request.query.path || '');
-  const targetDirectory = resolveVirtualPath(STORAGE_ROOT, targetPath);
-  const targetStats = await fs.lstat(targetDirectory).catch((error) => {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  });
-  if (!targetStats?.isDirectory() || targetStats.isSymbolicLink()) {
-    await Promise.all((request.files || []).map((file) => fs.rm(file.path, { force: true })));
-    response.status(404).json({ error: '上传目标文件夹不存在', code: 'NOT_FOUND' });
-    return;
-  }
-  if (!request.files?.length) {
-    response.status(400).json({ error: '请选择需要上传的文件', code: 'NO_FILES' });
-    return;
-  }
-
-  const stored = [];
-  try {
-    for (const file of request.files) {
-      let destination;
-      while (true) {
-        destination = await chooseUniqueDestination(targetDirectory, file.originalname);
-        try {
-          await fs.link(file.path, destination.absolutePath);
-          break;
-        } catch (error) {
-          if (error.code !== 'EEXIST') throw error;
-        }
-      }
-      await fs.rm(file.path, { force: true });
-      stored.push({
-        name: destination.name,
-        path: joinVirtualPath(targetPath, destination.name),
-        size: file.size,
-        kind: 'file'
-      });
-    }
-  } finally {
-    await Promise.all(request.files.map((file) => fs.rm(file.path, { force: true }).catch(() => {})));
-  }
-  response.status(201).json({ files: stored });
 });
 
 app.get('/api/download', async (request, response, next) => {
@@ -346,24 +407,24 @@ app.use((error, request, response, next) => {
       : error.code === 'LIMIT_FILE_COUNT'
         ? `一次最多上传 ${MAX_UPLOAD_FILES} 个文件`
         : '文件上传失败';
-    response.status(413).json({ error: message, code: error.code });
+    uploadErrorResponse(request, response, 413, message, error.code);
     return;
   }
   if (['INVALID_PATH', 'INVALID_NAME', 'INVALID_ITEM', 'ROOT_OPERATION_FORBIDDEN'].includes(error.code)) {
-    response.status(400).json({ error: error.message, code: error.code });
+    uploadErrorResponse(request, response, 400, error.message, error.code);
     return;
   }
   if (['ALREADY_EXISTS', 'SAME_DESTINATION', 'INVALID_DESTINATION'].includes(error.code)) {
-    response.status(409).json({ error: error.message, code: error.code });
+    uploadErrorResponse(request, response, 409, error.message, error.code);
     return;
   }
   if (['NOT_FOUND', 'NOT_DIRECTORY'].includes(error.code)) {
-    response.status(404).json({ error: error.message, code: error.code });
+    uploadErrorResponse(request, response, 404, error.message, error.code);
     return;
   }
 
   console.error(`[${new Date().toISOString()}]`, error);
-  response.status(500).json({ error: '服务器处理请求时出现错误', code: 'INTERNAL_ERROR' });
+  uploadErrorResponse(request, response, 500, '服务器处理请求时出现错误', 'INTERNAL_ERROR');
 });
 
 async function start() {
@@ -373,6 +434,8 @@ async function start() {
     console.log(`MyDrive listening on http://${HOST}:${PORT}`);
     console.log(`Storage root: ${STORAGE_ROOT}`);
   });
+  server.requestTimeout = REQUEST_TIMEOUT_MS;
+  server.timeout = REQUEST_TIMEOUT_MS;
 
   const shutdown = (signal) => {
     console.log(`${signal} received, shutting down`);

@@ -124,7 +124,7 @@ async function searchItems(root, query, limit = 200) {
 async function chooseUniqueDestination(directory, originalName) {
   const parsed = path.parse(sanitizeUploadName(originalName));
   for (let index = 0; index < 10_000; index += 1) {
-    const suffix = index === 0 ? '' : ` (${index})`;
+    const suffix = index === 0 ? '' : `_${index}`;
     const candidate = `${parsed.name}${suffix}${parsed.ext}`;
     const absolutePath = path.join(directory, candidate);
     try {

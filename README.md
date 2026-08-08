@@ -7,6 +7,7 @@ MyDrive 是一个面向单用户、单台 Ubuntu 服务器的私人网盘。项�
 - 唯一账号登录，不提供注册或账号创建入口
 - 30 天登录会话，使用 HttpOnly 签名 Cookie
 - 多文件上传、上传进度与拖放上传
+- Kaggle Bearer Token 流式上传，支持超大模型文件和命令行进度
 - 文件下载、新建文件夹、移动与重命名文件或文件夹、递归删除目录
 - 文件夹层级、面包屑导航、全盘递归搜索
 - 同名上传自动添加编号，不覆盖已有文件
@@ -39,4 +40,4 @@ npm start
 npm run check
 ```
 
-生产部署请阅读 [DEPLOY.md](DEPLOY.md)。登录密码和会话密钥只保存在服务器的 `/etc/mydrive.env`，不会提交到 Git 仓库。
+Kaggle 上传脚本为仓库根目录的 `transfer.py`。生产部署和 Token 配置请阅读 [DEPLOY.md](DEPLOY.md)。登录密码、会话密钥和真实上传 Token 只保存在服务器，不会提交到 Git 仓库。

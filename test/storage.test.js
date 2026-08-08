@@ -51,7 +51,7 @@ test('unique upload destinations add a numeric suffix', async (context) => {
   context.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.writeFile(path.join(root, 'photo.jpg'), 'first');
   const destination = await chooseUniqueDestination(root, 'photo.jpg');
-  assert.equal(destination.name, 'photo (1).jpg');
+  assert.equal(destination.name, 'photo_1.jpg');
 });
 
 test('files can be renamed and moved without overwriting existing items', async (context) => {
