@@ -8,7 +8,9 @@ const path = require('node:path');
 const {
   chooseUniqueDestination,
   listDirectory,
+  moveItem,
   normalizeVirtualPath,
+  renameItem,
   resolveVirtualPath,
   sanitizeUploadName,
   searchItems,
@@ -50,4 +52,33 @@ test('unique upload destinations add a numeric suffix', async (context) => {
   await fs.writeFile(path.join(root, 'photo.jpg'), 'first');
   const destination = await chooseUniqueDestination(root, 'photo.jpg');
   assert.equal(destination.name, 'photo (1).jpg');
+});
+
+test('files can be renamed and moved without overwriting existing items', async (context) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mydrive-move-'));
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, '来源'));
+  await fs.mkdir(path.join(root, '目标'));
+  await fs.writeFile(path.join(root, '来源', '笔记.txt'), 'notes');
+
+  const renamed = await renameItem(root, '来源/笔记.txt', '复习笔记.txt');
+  assert.equal(renamed.path, '来源/复习笔记.txt');
+  assert.equal(await fs.readFile(path.join(root, '来源', '复习笔记.txt'), 'utf8'), 'notes');
+
+  const moved = await moveItem(root, renamed.path, '目标');
+  assert.equal(moved.path, '目标/复习笔记.txt');
+  assert.equal(await fs.readFile(path.join(root, '目标', '复习笔记.txt'), 'utf8'), 'notes');
+
+  await fs.writeFile(path.join(root, '来源', '复习笔记.txt'), 'conflict');
+  await assert.rejects(() => moveItem(root, moved.path, '来源'), { code: 'ALREADY_EXISTS' });
+});
+
+test('folders cannot be moved into themselves or their descendants', async (context) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mydrive-cycle-'));
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, '课程', '章节'), { recursive: true });
+
+  await assert.rejects(() => moveItem(root, '课程', '课程'), { code: 'INVALID_DESTINATION' });
+  await assert.rejects(() => moveItem(root, '课程', '课程/章节'), { code: 'INVALID_DESTINATION' });
+  await assert.rejects(() => renameItem(root, '', '根目录'), { code: 'ROOT_OPERATION_FORBIDDEN' });
 });

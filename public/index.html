@@ -155,6 +155,45 @@
     </form>
   </dialog>
 
+  <dialog id="rename-dialog" class="dialog">
+    <form id="rename-form" method="dialog">
+      <div class="dialog-icon rename-dialog-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.8 4.8L8 20l11-11-4-4z"/><path d="m13.5 6.5 4 4"/></svg></div>
+      <div class="dialog-copy">
+        <h2>重命名</h2>
+        <p id="rename-description">输入新的名称</p>
+      </div>
+      <label for="rename-input">新名称</label>
+      <input id="rename-input" name="newName" maxlength="255" required autocomplete="off">
+      <p id="rename-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="rename-cancel" class="button button-ghost" type="button">取消</button>
+        <button id="rename-confirm" class="button button-primary" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="move-dialog" class="dialog move-dialog">
+    <form id="move-form" method="dialog">
+      <div class="dialog-icon move-dialog-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m9 16 3-3 3 3M12 13v6"/></svg></div>
+      <div class="dialog-copy move-dialog-copy">
+        <h2>移动到</h2>
+        <p id="move-description">选择目标文件夹</p>
+      </div>
+      <nav id="move-breadcrumbs" class="move-breadcrumbs" aria-label="目标文件夹路径"></nav>
+      <div id="move-folder-list" class="move-folder-list" aria-live="polite"></div>
+      <div id="move-empty" class="move-empty" hidden>这里没有其他文件夹</div>
+      <p id="move-error" class="form-error" role="alert"></p>
+      <div class="move-selected-path">
+        <span>目标位置</span>
+        <strong id="move-selected-path">我的文件</strong>
+      </div>
+      <div class="dialog-actions">
+        <button id="move-cancel" class="button button-ghost" type="button">取消</button>
+        <button id="move-confirm" class="button button-primary" type="submit">移动到这里</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="delete-dialog" class="dialog">
     <form id="delete-form" method="dialog">
       <div class="dialog-icon danger-dialog-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></div>

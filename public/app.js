@@ -9,6 +9,10 @@ const state = {
   searchTimer: null,
   requestSequence: 0,
   deleteTarget: null,
+  renameTarget: null,
+  moveTarget: null,
+  movePath: '',
+  moveRequestSequence: 0,
   dragDepth: 0
 };
 
@@ -52,6 +56,23 @@ const elements = {
   folderName: document.querySelector('#folder-name'),
   folderError: document.querySelector('#folder-error'),
   folderCancel: document.querySelector('#folder-cancel'),
+  renameDialog: document.querySelector('#rename-dialog'),
+  renameForm: document.querySelector('#rename-form'),
+  renameDescription: document.querySelector('#rename-description'),
+  renameInput: document.querySelector('#rename-input'),
+  renameError: document.querySelector('#rename-error'),
+  renameConfirm: document.querySelector('#rename-confirm'),
+  renameCancel: document.querySelector('#rename-cancel'),
+  moveDialog: document.querySelector('#move-dialog'),
+  moveForm: document.querySelector('#move-form'),
+  moveDescription: document.querySelector('#move-description'),
+  moveBreadcrumbs: document.querySelector('#move-breadcrumbs'),
+  moveFolderList: document.querySelector('#move-folder-list'),
+  moveEmpty: document.querySelector('#move-empty'),
+  moveError: document.querySelector('#move-error'),
+  moveSelectedPath: document.querySelector('#move-selected-path'),
+  moveConfirm: document.querySelector('#move-confirm'),
+  moveCancel: document.querySelector('#move-cancel'),
   deleteDialog: document.querySelector('#delete-dialog'),
   deleteForm: document.querySelector('#delete-form'),
   deleteDescription: document.querySelector('#delete-description'),
@@ -64,6 +85,8 @@ const icons = {
   chevron: '<path d="m9 18 6-6-6-6"/>',
   folder: '<path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 20h14"/>',
+  move: '<path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m9 16 3-3 3 3M12 13v6"/>',
+  rename: '<path d="m4 16-.8 4.8L8 20l11-11-4-4z"/><path d="m13.5 6.5 4 4"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>'
 };
 
@@ -206,6 +229,11 @@ function downloadItem(item) {
   anchor.remove();
 }
 
+function parentPath(virtualPath) {
+  const separator = virtualPath.lastIndexOf('/');
+  return separator < 0 ? '' : virtualPath.slice(0, separator);
+}
+
 function renderFileRow(item) {
   const row = document.createElement('article');
   row.className = 'file-row';
@@ -250,6 +278,8 @@ function renderFileRow(item) {
   if (item.kind === 'file') {
     actions.append(actionButton('下载', icons.download, 'download', () => downloadItem(item)));
   }
+  actions.append(actionButton('移动', icons.move, 'move', () => askMove(item)));
+  actions.append(actionButton('重命名', icons.rename, 'rename', () => askRename(item)));
   actions.append(actionButton('删除', icons.trash, 'delete', () => askDelete(item)));
 
   row.append(nameCell, modified, size, actions);
@@ -376,6 +406,175 @@ function askDelete(item) {
   const extra = item.kind === 'folder' ? '文件夹内的所有内容也会被删除，' : '';
   elements.deleteDescription.textContent = `确定删除“${item.name}”吗？${extra}删除后无法恢复。`;
   elements.deleteDialog.showModal();
+}
+
+function updateCurrentPath(previousPath, nextPath) {
+  if (state.currentPath === previousPath || state.currentPath.startsWith(`${previousPath}/`)) {
+    state.currentPath = `${nextPath}${state.currentPath.slice(previousPath.length)}`;
+    updateLocation(state.currentPath, false);
+  }
+}
+
+async function refreshCurrentView() {
+  if (state.searchQuery) await runSearch(state.searchQuery);
+  else await loadDirectory(state.currentPath, false);
+}
+
+function askRename(item) {
+  state.renameTarget = item;
+  elements.renameDescription.textContent = `修改“${item.name}”的名称`;
+  elements.renameInput.value = item.name;
+  elements.renameError.textContent = '';
+  elements.renameDialog.showModal();
+  window.setTimeout(() => {
+    elements.renameInput.focus();
+    const extensionStart = item.kind === 'file' ? item.name.lastIndexOf('.') : -1;
+    elements.renameInput.setSelectionRange(0, extensionStart > 0 ? extensionStart : item.name.length);
+  }, 30);
+}
+
+async function submitRename() {
+  if (!state.renameTarget) return;
+  const target = state.renameTarget;
+  const name = elements.renameInput.value.trim();
+  if (!name) {
+    elements.renameError.textContent = '请输入新的名称';
+    return;
+  }
+  elements.renameError.textContent = '';
+  elements.renameConfirm.disabled = true;
+  try {
+    const result = await api('/api/items/rename', {
+      method: 'PATCH',
+      body: JSON.stringify({ path: target.path, name })
+    });
+    updateCurrentPath(result.previousPath, result.path);
+    elements.renameDialog.close();
+    state.renameTarget = null;
+    showToast(result.changed ? `已重命名为“${result.name}”` : '名称没有变化');
+    await refreshCurrentView();
+  } catch (error) {
+    elements.renameError.textContent = error.message;
+  } finally {
+    elements.renameConfirm.disabled = false;
+  }
+}
+
+function isInvalidMoveFolder(folderPath) {
+  if (!state.moveTarget || state.moveTarget.kind !== 'folder') return false;
+  return folderPath === state.moveTarget.path || folderPath.startsWith(`${state.moveTarget.path}/`);
+}
+
+function renderMoveBreadcrumbs() {
+  const nodes = [];
+  const segments = state.movePath ? state.movePath.split('/') : [];
+  const root = document.createElement('button');
+  root.type = 'button';
+  root.className = 'move-crumb';
+  root.textContent = '我的文件';
+  if (segments.length === 0) root.setAttribute('aria-current', 'page');
+  root.addEventListener('click', () => loadMoveFolders(''));
+  nodes.push(root);
+
+  let accumulated = '';
+  segments.forEach((segment, index) => {
+    const separator = createSvg(icons.chevron);
+    separator.classList.add('move-crumb-separator');
+    nodes.push(separator);
+    accumulated = accumulated ? `${accumulated}/${segment}` : segment;
+    const targetPath = accumulated;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'move-crumb';
+    button.textContent = segment;
+    if (index === segments.length - 1) button.setAttribute('aria-current', 'page');
+    button.addEventListener('click', () => loadMoveFolders(targetPath));
+    nodes.push(button);
+  });
+  elements.moveBreadcrumbs.replaceChildren(...nodes);
+}
+
+function renderMoveFolders(items) {
+  const folders = items.filter((item) => item.kind === 'folder');
+  const rows = folders.map((folder) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'move-folder-row';
+    const disabled = isInvalidMoveFolder(folder.path);
+    button.disabled = disabled;
+    button.append(makeFileIcon(folder));
+    const name = document.createElement('span');
+    name.textContent = folder.name;
+    button.append(name);
+    if (disabled) {
+      const note = document.createElement('small');
+      note.textContent = '不能选择';
+      button.append(note);
+    } else {
+      button.append(createSvg(icons.chevron));
+      button.addEventListener('click', () => loadMoveFolders(folder.path));
+    }
+    return button;
+  });
+  elements.moveFolderList.replaceChildren(...rows);
+  elements.moveEmpty.hidden = rows.length !== 0;
+}
+
+async function loadMoveFolders(path) {
+  const sequence = ++state.moveRequestSequence;
+  elements.moveError.textContent = '';
+  elements.moveFolderList.textContent = '正在读取文件夹…';
+  elements.moveFolderList.classList.add('file-meta');
+  elements.moveEmpty.hidden = true;
+  try {
+    const payload = await api(`/api/files?path=${encodeURIComponent(path)}`);
+    if (sequence !== state.moveRequestSequence) return;
+    state.movePath = payload.currentPath;
+    renderMoveBreadcrumbs();
+    renderMoveFolders(payload.items);
+    elements.moveSelectedPath.textContent = payload.currentPath ? `我的文件 / ${payload.currentPath}` : '我的文件';
+    const sameParent = state.moveTarget && parentPath(state.moveTarget.path) === payload.currentPath;
+    const invalidFolder = state.moveTarget && isInvalidMoveFolder(payload.currentPath);
+    elements.moveConfirm.disabled = sameParent || invalidFolder;
+    elements.moveConfirm.title = sameParent ? '文件已经位于这个文件夹中' : '';
+  } catch (error) {
+    elements.moveError.textContent = error.message;
+    elements.moveFolderList.replaceChildren();
+  } finally {
+    elements.moveFolderList.classList.remove('file-meta');
+  }
+}
+
+function askMove(item) {
+  state.moveTarget = item;
+  state.movePath = '';
+  elements.moveConfirm.disabled = true;
+  elements.moveDescription.textContent = `选择“${item.name}”的新位置`;
+  elements.moveError.textContent = '';
+  elements.moveDialog.showModal();
+  loadMoveFolders('');
+}
+
+async function submitMove() {
+  if (!state.moveTarget) return;
+  const target = state.moveTarget;
+  elements.moveError.textContent = '';
+  elements.moveConfirm.disabled = true;
+  try {
+    const result = await api('/api/items/move', {
+      method: 'PATCH',
+      body: JSON.stringify({ path: target.path, destinationPath: state.movePath })
+    });
+    updateCurrentPath(result.previousPath, result.path);
+    elements.moveDialog.close();
+    state.moveTarget = null;
+    showToast(`已将“${result.name}”移动到新位置`);
+    await refreshCurrentView();
+  } catch (error) {
+    elements.moveError.textContent = error.message;
+  } finally {
+    elements.moveConfirm.disabled = false;
+  }
 }
 
 async function deleteTarget() {
@@ -526,6 +725,24 @@ elements.folderForm.addEventListener('submit', (event) => {
     return;
   }
   createFolder(name);
+});
+
+elements.renameCancel.addEventListener('click', () => {
+  state.renameTarget = null;
+  elements.renameDialog.close();
+});
+elements.renameForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  submitRename();
+});
+
+elements.moveCancel.addEventListener('click', () => {
+  state.moveTarget = null;
+  elements.moveDialog.close();
+});
+elements.moveForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  submitMove();
 });
 
 elements.deleteCancel.addEventListener('click', () => {

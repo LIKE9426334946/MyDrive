@@ -17,7 +17,9 @@ const {
   chooseUniqueDestination,
   joinVirtualPath,
   listDirectory,
+  moveItem,
   normalizeVirtualPath,
+  renameItem,
   resolveVirtualPath,
   searchItems,
   validateItemName
@@ -299,6 +301,16 @@ app.get('/api/download', async (request, response, next) => {
   }
 });
 
+app.patch('/api/items/rename', requireSameOriginWrite, async (request, response) => {
+  const result = await renameItem(STORAGE_ROOT, request.body?.path, request.body?.name);
+  response.json(result);
+});
+
+app.patch('/api/items/move', requireSameOriginWrite, async (request, response) => {
+  const result = await moveItem(STORAGE_ROOT, request.body?.path, request.body?.destinationPath || '');
+  response.json(result);
+});
+
 app.delete('/api/items', requireSameOriginWrite, async (request, response) => {
   const virtualPath = normalizeVirtualPath(request.body?.path || '');
   if (!virtualPath) {
@@ -337,8 +349,12 @@ app.use((error, request, response, next) => {
     response.status(413).json({ error: message, code: error.code });
     return;
   }
-  if (['INVALID_PATH', 'INVALID_NAME'].includes(error.code)) {
+  if (['INVALID_PATH', 'INVALID_NAME', 'INVALID_ITEM', 'ROOT_OPERATION_FORBIDDEN'].includes(error.code)) {
     response.status(400).json({ error: error.message, code: error.code });
+    return;
+  }
+  if (['ALREADY_EXISTS', 'SAME_DESTINATION', 'INVALID_DESTINATION'].includes(error.code)) {
+    response.status(409).json({ error: error.message, code: error.code });
     return;
   }
   if (['NOT_FOUND', 'NOT_DIRECTORY'].includes(error.code)) {

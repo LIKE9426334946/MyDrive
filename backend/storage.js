@@ -137,12 +137,106 @@ async function chooseUniqueDestination(directory, originalName) {
   throw createStorageError('无法为文件生成唯一名称', 'NAME_CONFLICT');
 }
 
+function parentVirtualPath(virtualPath) {
+  const normalized = normalizeVirtualPath(virtualPath);
+  const separator = normalized.lastIndexOf('/');
+  return separator < 0 ? '' : normalized.slice(0, separator);
+}
+
+async function requireMovableItem(root, virtualPath) {
+  const normalizedPath = normalizeVirtualPath(virtualPath);
+  if (!normalizedPath) throw createStorageError('不能操作网盘根目录', 'ROOT_OPERATION_FORBIDDEN');
+  const absolutePath = resolveVirtualPath(root, normalizedPath);
+  const stats = await fs.lstat(absolutePath).catch((error) => {
+    if (error.code === 'ENOENT') throw createStorageError('文件或文件夹不存在', 'NOT_FOUND');
+    throw error;
+  });
+  if (stats.isSymbolicLink() || (!stats.isFile() && !stats.isDirectory())) {
+    throw createStorageError('目标不是有效文件或文件夹', 'INVALID_ITEM');
+  }
+  return { normalizedPath, absolutePath, stats };
+}
+
+async function requireDestinationDirectory(root, virtualPath) {
+  const normalizedPath = normalizeVirtualPath(virtualPath);
+  const absolutePath = resolveVirtualPath(root, normalizedPath);
+  const stats = await fs.lstat(absolutePath).catch((error) => {
+    if (error.code === 'ENOENT') throw createStorageError('目标文件夹不存在', 'NOT_FOUND');
+    throw error;
+  });
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw createStorageError('目标不是有效文件夹', 'NOT_DIRECTORY');
+  }
+  return { normalizedPath, absolutePath };
+}
+
+async function assertDestinationAvailable(absolutePath) {
+  try {
+    await fs.lstat(absolutePath);
+    throw createStorageError('目标位置已存在同名文件或文件夹', 'ALREADY_EXISTS');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+async function renameItem(root, virtualPath, newName) {
+  const source = await requireMovableItem(root, virtualPath);
+  const name = validateItemName(newName);
+  const parentPath = parentVirtualPath(source.normalizedPath);
+  const destinationPath = joinVirtualPath(parentPath, name);
+  if (destinationPath === source.normalizedPath) {
+    return { previousPath: source.normalizedPath, path: source.normalizedPath, name, changed: false };
+  }
+
+  const destinationAbsolutePath = resolveVirtualPath(root, destinationPath);
+  await assertDestinationAvailable(destinationAbsolutePath);
+  await fs.rename(source.absolutePath, destinationAbsolutePath);
+  return {
+    previousPath: source.normalizedPath,
+    path: destinationPath,
+    name,
+    kind: source.stats.isDirectory() ? 'folder' : 'file',
+    changed: true
+  };
+}
+
+async function moveItem(root, virtualPath, destinationDirectoryPath) {
+  const source = await requireMovableItem(root, virtualPath);
+  const destinationDirectory = await requireDestinationDirectory(root, destinationDirectoryPath);
+  const currentParentPath = parentVirtualPath(source.normalizedPath);
+  if (destinationDirectory.normalizedPath === currentParentPath) {
+    throw createStorageError('文件已经位于这个文件夹中', 'SAME_DESTINATION');
+  }
+  if (
+    source.stats.isDirectory() &&
+    (destinationDirectory.absolutePath === source.absolutePath ||
+      destinationDirectory.absolutePath.startsWith(`${source.absolutePath}${path.sep}`))
+  ) {
+    throw createStorageError('不能把文件夹移动到自己或自己的子文件夹中', 'INVALID_DESTINATION');
+  }
+
+  const name = path.posix.basename(source.normalizedPath);
+  const destinationPath = joinVirtualPath(destinationDirectory.normalizedPath, name);
+  const destinationAbsolutePath = resolveVirtualPath(root, destinationPath);
+  await assertDestinationAvailable(destinationAbsolutePath);
+  await fs.rename(source.absolutePath, destinationAbsolutePath);
+  return {
+    previousPath: source.normalizedPath,
+    path: destinationPath,
+    name,
+    kind: source.stats.isDirectory() ? 'folder' : 'file'
+  };
+}
+
 module.exports = {
   chooseUniqueDestination,
   createStorageError,
   joinVirtualPath,
   listDirectory,
+  moveItem,
   normalizeVirtualPath,
+  parentVirtualPath,
+  renameItem,
   resolveVirtualPath,
   sanitizeUploadName,
   searchItems,

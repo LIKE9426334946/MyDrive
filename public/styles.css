@@ -290,7 +290,7 @@ svg {
 
 .file-list-header, .file-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 180px 110px 86px;
+  grid-template-columns: minmax(260px, 1fr) 180px 110px 166px;
   align-items: center;
   gap: 18px;
 }
@@ -324,6 +324,7 @@ svg {
 .file-action-button { width: 34px; height: 34px; border-radius: 9px; }
 .file-action-button svg { width: 17px; height: 17px; }
 .file-action-button.delete:hover { color: var(--danger); background: var(--danger-soft); }
+.file-action-button.rename:hover, .file-action-button.move:hover { color: var(--primary); background: var(--primary-soft); }
 
 .empty-state { display: grid; min-height: 340px; place-items: center; align-content: center; padding: 38px 20px; text-align: center; }
 .empty-illustration { display: grid; width: 100px; height: 82px; place-items: center; color: #9ba9e9; }
@@ -358,11 +359,34 @@ svg {
 .dialog-icon { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 12px; }
 .dialog-icon svg { width: 22px; height: 22px; }
 .folder-dialog-icon { color: var(--primary); background: var(--primary-soft); }
+.rename-dialog-icon { color: #8b5bd0; background: #f3edfb; }
+.move-dialog-icon { color: #d7923c; background: #fff4df; }
 .danger-dialog-icon { color: var(--danger); background: var(--danger-soft); }
 .dialog-copy { margin: 14px 0 21px; }
 .dialog-copy h2 { margin: 0; font-size: 1.15rem; }
 .dialog-copy p { margin: 7px 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.55; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 19px; }
+
+.move-dialog { width: min(520px, calc(100% - 30px)); }
+.move-dialog-copy { margin-bottom: 14px; }
+.move-breadcrumbs { display: flex; min-height: 34px; align-items: center; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.move-breadcrumbs::-webkit-scrollbar { display: none; }
+.move-crumb { flex: 0 0 auto; padding: 5px 6px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 0.75rem; cursor: pointer; }
+.move-crumb:hover { color: var(--primary); background: var(--primary-soft); }
+.move-crumb[aria-current="page"] { color: var(--text); font-weight: 650; }
+.move-crumb-separator { width: 13px; height: 13px; flex: 0 0 auto; color: #b3bdca; }
+.move-folder-list { display: grid; max-height: 250px; min-height: 88px; align-content: start; overflow-y: auto; padding: 7px 0; }
+.move-folder-row { display: flex; min-width: 0; min-height: 47px; align-items: center; gap: 10px; padding: 5px 9px; border: 0; border-radius: 9px; color: #3b4658; text-align: left; background: transparent; cursor: pointer; }
+.move-folder-row:hover { background: #f6f8fc; }
+.move-folder-row:disabled { color: #a6afbd; cursor: not-allowed; }
+.move-folder-row:disabled:hover { background: transparent; }
+.move-folder-row .file-icon { width: 34px; height: 34px; border-radius: 9px; }
+.move-folder-row > span:nth-child(2) { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; font-weight: 580; }
+.move-folder-row > small { flex: 0 0 auto; color: var(--faint); font-size: 0.67rem; }
+.move-folder-row > svg { width: 15px; height: 15px; color: #a7b0bf; }
+.move-empty { display: grid; min-height: 88px; place-items: center; color: var(--faint); font-size: 0.79rem; }
+.move-selected-path { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 5px; padding: 10px 12px; border-radius: 9px; color: var(--muted); background: #f6f8fb; font-size: 0.74rem; }
+.move-selected-path strong { min-width: 0; overflow: hidden; color: #445168; text-overflow: ellipsis; white-space: nowrap; }
 
 .toast-region { position: fixed; z-index: 70; top: 88px; right: 24px; display: grid; width: min(360px, calc(100vw - 32px)); gap: 10px; pointer-events: none; }
 .toast { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; color: #354052; background: #fff; box-shadow: var(--shadow-small); font-size: 0.8rem; line-height: 1.45; animation: toast-in 180ms ease-out; }
@@ -375,7 +399,7 @@ svg {
   .search-shell { grid-column: 1 / -1; grid-row: 2; }
   .account-name { display: none; }
   .drive-main { width: calc(100% - 28px); padding-top: 26px; }
-  .file-list-header, .file-row { grid-template-columns: minmax(220px, 1fr) 135px 80px 74px; }
+  .file-list-header, .file-row { grid-template-columns: minmax(200px, 1fr) 125px 75px 158px; }
 }
 
 @media (max-width: 600px) {
@@ -423,6 +447,7 @@ svg {
   .upload-progress { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }
   .toast-region { top: auto; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }
   .dialog form { padding: 24px; }
+  .move-folder-list { max-height: min(250px, 34vh); }
 }
 
 @media (prefers-reduced-motion: reduce) {
