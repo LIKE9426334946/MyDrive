@@ -1,0 +1,39 @@
+[Unit]
+Description=MyDrive personal file drive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/MyDrive
+ExecStart=/usr/bin/node /opt/MyDrive/backend/server.js
+
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3025
+EnvironmentFile=/etc/mydrive.env
+
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+KillSignal=SIGTERM
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/MyDrive/data
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mydrive
+
+[Install]
+WantedBy=multi-user.target

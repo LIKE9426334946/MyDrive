@@ -1,0 +1,10 @@
+node_modules/
+.env
+*.log
+.DS_Store
+
+# User files and temporary uploads must never be committed.
+data/uploads/*
+!data/uploads/.gitkeep
+data/tmp/*
+!data/tmp/.gitkeep
