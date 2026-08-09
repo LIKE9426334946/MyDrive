@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   chooseUniqueDestination,
+  decodeMultipartFilename,
   listDirectory,
   moveItem,
   normalizeVirtualPath,
@@ -30,6 +31,17 @@ test('item names reject path separators and control characters', () => {
   assert.throws(() => validateItemName('../secret'), { code: 'INVALID_NAME' });
   assert.throws(() => validateItemName('bad\nname'), { code: 'INVALID_NAME' });
   assert.equal(sanitizeUploadName('../../photo.jpg'), 'photo.jpg');
+});
+
+test('multipart filenames recover UTF-8 text misread as Latin-1', () => {
+  const expected = '机器学习模型.mp4';
+  const mojibake = Buffer.from(expected, 'utf8').toString('latin1');
+  assert.equal(decodeMultipartFilename(mojibake), expected);
+  assert.equal(sanitizeUploadName(mojibake), expected);
+
+  assert.equal(sanitizeUploadName('中文文件.txt'), '中文文件.txt');
+  assert.equal(sanitizeUploadName('café.txt'), 'café.txt');
+  assert.equal(sanitizeUploadName('实验🧪.txt'), '实验🧪.txt');
 });
 
 test('directories are listed folder-first and searched recursively', async (context) => {
