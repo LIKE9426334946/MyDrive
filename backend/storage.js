@@ -45,8 +45,19 @@ function validateItemName(name) {
   return normalized;
 }
 
+function decodeMultipartFilename(name) {
+  const value = String(name);
+  if (!value || [...value].some((character) => character.codePointAt(0) > 0xff)) return value;
+
+  const originalBytes = Buffer.from(value, 'latin1');
+  const decoded = originalBytes.toString('utf8');
+  if (decoded.includes('\ufffd') || !Buffer.from(decoded, 'utf8').equals(originalBytes)) return value;
+  return decoded;
+}
+
 function sanitizeUploadName(name) {
-  const basename = path.basename(String(name).replace(/\\/g, '/'));
+  const decodedName = decodeMultipartFilename(name);
+  const basename = path.basename(decodedName.replace(/\\/g, '/'));
   const cleaned = basename.replace(/[\u0000-\u001f\u007f/\\]/gu, '_').normalize('NFC').trim();
   return validateItemName(cleaned || '未命名文件');
 }
@@ -231,6 +242,7 @@ async function moveItem(root, virtualPath, destinationDirectoryPath) {
 module.exports = {
   chooseUniqueDestination,
   createStorageError,
+  decodeMultipartFilename,
   joinVirtualPath,
   listDirectory,
   moveItem,
