@@ -319,8 +319,7 @@ svg {
 .file-icon.pdf { color: #dc5562; background: #fff0f1; }
 
 .file-meta { color: #78859a; font-size: 0.78rem; }
-.file-actions { display: flex; justify-content: flex-end; gap: 2px; opacity: 0; transition: opacity 130ms ease; }
-.file-row:hover .file-actions, .file-actions:focus-within { opacity: 1; }
+.file-actions { display: flex; justify-content: flex-end; gap: 2px; opacity: 1; }
 .file-action-button { width: 34px; height: 34px; border-radius: 9px; }
 .file-action-button svg { width: 17px; height: 17px; }
 .file-action-button.delete:hover { color: var(--danger); background: var(--danger-soft); }
