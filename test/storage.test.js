@@ -11,6 +11,7 @@ const {
   listDirectory,
   moveItem,
   normalizeVirtualPath,
+  prepareBatchItems,
   renameItem,
   resolveVirtualPath,
   sanitizeUploadName,
@@ -93,4 +94,23 @@ test('folders cannot be moved into themselves or their descendants', async (cont
   await assert.rejects(() => moveItem(root, '课程', '课程'), { code: 'INVALID_DESTINATION' });
   await assert.rejects(() => moveItem(root, '课程', '课程/章节'), { code: 'INVALID_DESTINATION' });
   await assert.rejects(() => renameItem(root, '', '根目录'), { code: 'ROOT_OPERATION_FORBIDDEN' });
+});
+
+test('batch selections are validated, deduplicated, and collapse nested paths', async (context) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mydrive-batch-'));
+  context.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, '课程', '章节'), { recursive: true });
+  await fs.writeFile(path.join(root, '课程', '章节', '笔记.txt'), 'notes');
+  await fs.writeFile(path.join(root, '作业.txt'), 'homework');
+
+  const items = await prepareBatchItems(root, [
+    '课程/章节/笔记.txt',
+    '课程',
+    '课程',
+    '作业.txt'
+  ]);
+  assert.deepEqual(items.map((item) => item.normalizedPath), ['课程', '作业.txt']);
+  await assert.rejects(() => prepareBatchItems(root, []), { code: 'INVALID_SELECTION' });
+  await assert.rejects(() => prepareBatchItems(root, ['']), { code: 'ROOT_OPERATION_FORBIDDEN' });
+  await assert.rejects(() => prepareBatchItems(root, ['不存在.txt']), { code: 'NOT_FOUND' });
 });

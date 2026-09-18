@@ -168,6 +168,23 @@ async function requireMovableItem(root, virtualPath) {
   return { normalizedPath, absolutePath, stats };
 }
 
+async function prepareBatchItems(root, paths, limit = 500) {
+  if (!Array.isArray(paths) || paths.length === 0 || paths.length > limit) {
+    throw createStorageError(`请选择 1 至 ${limit} 个项目`, 'INVALID_SELECTION');
+  }
+
+  const normalizedPaths = [...new Set(paths.map((itemPath) => normalizeVirtualPath(itemPath)))];
+  if (normalizedPaths.some((itemPath) => !itemPath)) {
+    throw createStorageError('不能批量操作网盘根目录', 'ROOT_OPERATION_FORBIDDEN');
+  }
+
+  const items = await Promise.all(normalizedPaths.map((itemPath) => requireMovableItem(root, itemPath)));
+  items.sort((left, right) => left.normalizedPath.length - right.normalizedPath.length);
+  return items.filter((item, index) => !items.slice(0, index).some(
+    (parent) => item.normalizedPath.startsWith(`${parent.normalizedPath}/`)
+  ));
+}
+
 async function requireDestinationDirectory(root, virtualPath) {
   const normalizedPath = normalizeVirtualPath(virtualPath);
   const absolutePath = resolveVirtualPath(root, normalizedPath);
@@ -248,6 +265,7 @@ module.exports = {
   moveItem,
   normalizeVirtualPath,
   parentVirtualPath,
+  prepareBatchItems,
   renameItem,
   resolveVirtualPath,
   sanitizeUploadName,

@@ -13,6 +13,8 @@ const state = {
   moveTarget: null,
   movePath: '',
   moveRequestSequence: 0,
+  selectionMode: false,
+  selectedPaths: new Set(),
   dragDepth: 0
 };
 
@@ -33,12 +35,19 @@ const elements = {
   pageEyebrow: document.querySelector('#page-eyebrow'),
   pageTitle: document.querySelector('#page-title'),
   breadcrumbs: document.querySelector('#breadcrumbs'),
+  selectModeButton: document.querySelector('#select-mode-button'),
   newFolderButton: document.querySelector('#new-folder-button'),
   uploadButton: document.querySelector('#upload-button'),
   emptyUploadButton: document.querySelector('#empty-upload-button'),
   fileInput: document.querySelector('#file-input'),
   filePanel: document.querySelector('#drop-zone'),
   dropOverlay: document.querySelector('#drop-overlay'),
+  selectionToolbar: document.querySelector('#selection-toolbar'),
+  selectAllCheckbox: document.querySelector('#select-all-checkbox'),
+  selectionCount: document.querySelector('#selection-count'),
+  batchDownloadButton: document.querySelector('#batch-download-button'),
+  batchDeleteButton: document.querySelector('#batch-delete-button'),
+  selectionCancelButton: document.querySelector('#selection-cancel-button'),
   listHeader: document.querySelector('#list-header'),
   loadingState: document.querySelector('#loading-state'),
   fileList: document.querySelector('#file-list'),
@@ -121,6 +130,9 @@ async function api(url, options = {}) {
 
 function showLogin() {
   state.authenticated = false;
+  state.selectionMode = false;
+  state.selectedPaths.clear();
+  elements.selectionToolbar.hidden = true;
   elements.driveView.hidden = true;
   elements.loginView.hidden = false;
   elements.password.value = '';
@@ -229,6 +241,54 @@ function downloadItem(item) {
   anchor.remove();
 }
 
+function selectedItems() {
+  return state.items.filter((item) => state.selectedPaths.has(item.path));
+}
+
+function updateSelectionUi() {
+  const count = state.selectedPaths.size;
+  const allSelected = state.items.length > 0 && count === state.items.length;
+  elements.selectionCount.textContent = `已选 ${count} 项`;
+  elements.selectAllCheckbox.checked = allSelected;
+  elements.selectAllCheckbox.indeterminate = count > 0 && !allSelected;
+  elements.batchDownloadButton.disabled = count === 0;
+  elements.batchDeleteButton.disabled = count === 0;
+}
+
+function setSelectionMode(enabled) {
+  state.selectionMode = Boolean(enabled) && !state.searchQuery && state.items.length > 0;
+  state.selectedPaths.clear();
+  renderItems(state.items);
+}
+
+function toggleItemSelection(itemPath, selected) {
+  if (selected) state.selectedPaths.add(itemPath);
+  else state.selectedPaths.delete(itemPath);
+  renderItems(state.items);
+}
+
+async function downloadSelectedItems() {
+  const paths = selectedItems().map((item) => item.path);
+  if (!paths.length) return;
+  elements.batchDownloadButton.disabled = true;
+  try {
+    const payload = await api('/api/items/archive', {
+      method: 'POST',
+      body: JSON.stringify({ paths })
+    });
+    const anchor = document.createElement('a');
+    anchor.href = payload.downloadUrl;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    showToast(`正在打包下载 ${paths.length} 个项目`);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    updateSelectionUi();
+  }
+}
+
 function parentPath(virtualPath) {
   const separator = virtualPath.lastIndexOf('/');
   return separator < 0 ? '' : virtualPath.slice(0, separator);
@@ -237,9 +297,20 @@ function parentPath(virtualPath) {
 function renderFileRow(item) {
   const row = document.createElement('article');
   row.className = 'file-row';
+  row.classList.toggle('selected', state.selectedPaths.has(item.path));
 
   const nameCell = document.createElement('div');
   nameCell.className = 'file-name-cell';
+  if (state.selectionMode) {
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'item-checkbox';
+    checkbox.checked = state.selectedPaths.has(item.path);
+    checkbox.setAttribute('aria-label', `选择 ${item.name}`);
+    checkbox.addEventListener('click', (event) => event.stopPropagation());
+    checkbox.addEventListener('change', () => toggleItemSelection(item.path, checkbox.checked));
+    nameCell.append(checkbox);
+  }
   const openButton = document.createElement('button');
   openButton.type = 'button';
   openButton.className = 'file-open-button';
@@ -262,7 +333,10 @@ function renderFileRow(item) {
     titleWrap.append(location);
   }
   openButton.append(titleWrap);
-  openButton.addEventListener('click', () => openItem(item));
+  openButton.addEventListener('click', () => {
+    if (state.selectionMode) toggleItemSelection(item.path, !state.selectedPaths.has(item.path));
+    else openItem(item);
+  });
   nameCell.append(openButton);
 
   const modified = document.createElement('span');
@@ -287,8 +361,20 @@ function renderFileRow(item) {
 }
 
 function renderItems(items) {
+  const availablePaths = new Set(items.map((item) => item.path));
+  for (const selectedPath of state.selectedPaths) {
+    if (!availablePaths.has(selectedPath)) state.selectedPaths.delete(selectedPath);
+  }
   elements.fileList.replaceChildren(...items.map(renderFileRow));
   elements.filePanel.classList.toggle('search-results', Boolean(state.searchQuery));
+  elements.filePanel.classList.toggle('selection-mode', state.selectionMode);
+  elements.selectionToolbar.hidden = !state.selectionMode;
+  elements.selectModeButton.classList.toggle('active', state.selectionMode);
+  elements.selectModeButton.setAttribute('aria-pressed', String(state.selectionMode));
+  elements.selectModeButton.disabled = Boolean(state.searchQuery) || items.length === 0;
+  elements.newFolderButton.disabled = state.selectionMode;
+  elements.uploadButton.disabled = state.selectionMode;
+  elements.searchInput.disabled = state.selectionMode;
   elements.listHeader.hidden = items.length === 0;
   elements.emptyState.hidden = items.length !== 0;
   elements.itemCount.textContent = state.searchQuery
@@ -302,6 +388,7 @@ function renderItems(items) {
       : '拖放文件到这里，或者使用上方的上传按钮';
     elements.emptyUploadButton.hidden = Boolean(state.searchQuery);
   }
+  updateSelectionUi();
 }
 
 function breadcrumbButton(label, path, isCurrent = false) {
@@ -358,6 +445,8 @@ async function loadDirectory(path = '', push = false) {
     state.currentPath = payload.currentPath;
     state.items = payload.items;
     state.searchQuery = '';
+    state.selectionMode = false;
+    state.selectedPaths.clear();
     elements.pageEyebrow.textContent = 'MY FILES';
     elements.pageTitle.textContent = payload.currentPath ? payload.currentPath.split('/').at(-1) : '我的文件';
     renderBreadcrumbs();
@@ -389,6 +478,8 @@ async function runSearch(query) {
     if (sequence !== state.requestSequence) return;
     state.searchQuery = payload.query;
     state.items = payload.items;
+    state.selectionMode = false;
+    state.selectedPaths.clear();
     elements.pageEyebrow.textContent = 'SEARCH';
     elements.pageTitle.textContent = '搜索结果';
     renderBreadcrumbs();
@@ -405,6 +496,14 @@ function askDelete(item) {
   state.deleteTarget = item;
   const extra = item.kind === 'folder' ? '文件夹内的所有内容也会被删除，' : '';
   elements.deleteDescription.textContent = `确定删除“${item.name}”吗？${extra}删除后无法恢复。`;
+  elements.deleteDialog.showModal();
+}
+
+function askBatchDelete() {
+  const items = selectedItems();
+  if (!items.length) return;
+  state.deleteTarget = { batch: true, items };
+  elements.deleteDescription.textContent = `确定删除选中的 ${items.length} 个项目吗？文件夹内的内容也会被删除，删除后无法恢复。`;
   elements.deleteDialog.showModal();
 }
 
@@ -582,10 +681,19 @@ async function deleteTarget() {
   const target = state.deleteTarget;
   elements.deleteConfirm.disabled = true;
   try {
-    await api('/api/items', { method: 'DELETE', body: JSON.stringify({ path: target.path }) });
+    if (target.batch) {
+      await api('/api/items/batch', {
+        method: 'DELETE',
+        body: JSON.stringify({ paths: target.items.map((item) => item.path) })
+      });
+    } else {
+      await api('/api/items', { method: 'DELETE', body: JSON.stringify({ path: target.path }) });
+    }
     elements.deleteDialog.close();
-    showToast(`已删除“${target.name}”`);
+    showToast(target.batch ? `已删除 ${target.items.length} 个项目` : `已删除“${target.name}”`);
     state.deleteTarget = null;
+    state.selectionMode = false;
+    state.selectedPaths.clear();
     if (state.searchQuery) await runSearch(state.searchQuery);
     else await loadDirectory(state.currentPath, false);
   } catch (error) {
@@ -710,6 +818,18 @@ elements.clearSearch.addEventListener('click', () => {
   runSearch('');
 });
 
+elements.selectModeButton.addEventListener('click', () => setSelectionMode(!state.selectionMode));
+elements.selectionCancelButton.addEventListener('click', () => setSelectionMode(false));
+elements.selectAllCheckbox.addEventListener('change', () => {
+  state.selectedPaths.clear();
+  if (elements.selectAllCheckbox.checked) {
+    for (const item of state.items) state.selectedPaths.add(item.path);
+  }
+  renderItems(state.items);
+});
+elements.batchDownloadButton.addEventListener('click', downloadSelectedItems);
+elements.batchDeleteButton.addEventListener('click', askBatchDelete);
+
 elements.newFolderButton.addEventListener('click', () => {
   elements.folderError.textContent = '';
   elements.folderForm.reset();
@@ -762,6 +882,7 @@ elements.fileInput.addEventListener('change', () => uploadFiles(elements.fileInp
 for (const eventName of ['dragenter', 'dragover']) {
   elements.filePanel.addEventListener(eventName, (event) => {
     event.preventDefault();
+    if (state.selectionMode) return;
     if (!event.dataTransfer?.types.includes('Files')) return;
     if (eventName === 'dragenter') state.dragDepth += 1;
     elements.dropOverlay.hidden = false;
