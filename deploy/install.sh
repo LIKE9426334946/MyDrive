@@ -66,6 +66,12 @@ if ! grep -q '^KAGGLE_UPLOAD_TOKEN=' "${ENV_FILE}"; then
   unset KAGGLE_UPLOAD_TOKEN_VALUE
   echo "已生成 Kaggle 上传 Token。"
 fi
+if ! grep -q '^CSV_UPLOAD_TOKEN=' "${ENV_FILE}"; then
+  CSV_UPLOAD_TOKEN_VALUE="$(openssl rand -hex 32)"
+  printf '\nCSV_UPLOAD_TOKEN=%s\n' "${CSV_UPLOAD_TOKEN_VALUE}" >> "${ENV_FILE}"
+  unset CSV_UPLOAD_TOKEN_VALUE
+  echo "已生成 CSV 上传 Token。"
+fi
 if grep -q '^MAX_UPLOAD_BYTES=' "${ENV_FILE}"; then
   sed -i 's/^MAX_UPLOAD_BYTES=.*/MAX_UPLOAD_BYTES=107374182400/' "${ENV_FILE}"
 else
@@ -94,3 +100,5 @@ echo
 echo "MyDrive 已启动：公网端口 16025，内部端口 3025。"
 echo "使用下面的命令查看 Kaggle 上传 Token："
 echo "grep '^KAGGLE_UPLOAD_TOKEN=' /etc/mydrive.env"
+echo "使用下面的命令查看 CSV 上传 Token："
+echo "grep '^CSV_UPLOAD_TOKEN=' /etc/mydrive.env"

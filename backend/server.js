@@ -6,6 +6,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const express = require('express');
 const multer = require('multer');
+const { createCsvUploadRouter } = require('./csv-upload');
 
 const {
   SESSION_TTL_MS,
@@ -34,6 +35,7 @@ const APP_USERNAME = process.env.APP_USERNAME || 'noart';
 const APP_PASSWORD = process.env.APP_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const KAGGLE_UPLOAD_TOKEN = process.env.KAGGLE_UPLOAD_TOKEN || '';
+const CSV_UPLOAD_TOKEN = process.env.CSV_UPLOAD_TOKEN || '';
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
 const STORAGE_ROOT = path.resolve(process.env.STORAGE_ROOT || path.join(__dirname, '..', 'data', 'uploads'));
 const TEMP_ROOT = path.resolve(process.env.TEMP_ROOT || path.join(__dirname, '..', 'data', 'tmp'));
@@ -302,6 +304,14 @@ app.post('/api/upload', authenticateUpload, upload.fields([
     response.status(201).json({ files: stored });
   }
 });
+
+// Independent CSV token: keep the Kaggle token restricted to /kaggle/.
+app.use('/api/upload/csv', createCsvUploadRouter({
+  token: CSV_UPLOAD_TOKEN,
+  storageRoot: STORAGE_ROOT,
+  tempRoot: TEMP_ROOT,
+  maxUploadBytes: MAX_UPLOAD_BYTES
+}));
 
 app.use('/api', requireAuthentication);
 

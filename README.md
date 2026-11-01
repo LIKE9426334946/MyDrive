@@ -8,6 +8,7 @@ MyDrive 是一个面向单用户、单台 Ubuntu 服务器的私人网盘。项�
 - 30 天登录会话，使用 HttpOnly 签名 Cookie
 - 多文件上传、上传进度与拖放上传
 - Kaggle Bearer Token 流式上传，支持超大模型文件和命令行进度
+- Windows PowerShell 递归上传 CSV，自定义本地/网盘目录，相对路径自动合并为文件名
 - 文件下载、新建文件夹、移动与重命名文件或文件夹、递归删除目录
 - 文件夹层级、面包屑导航、全盘递归搜索
 - 同名上传自动添加编号，不覆盖已有文件
@@ -41,3 +42,5 @@ npm run check
 ```
 
 Kaggle 上传脚本为仓库根目录的 `transfer.py`。生产部署和 Token 配置请阅读 [DEPLOY.md](DEPLOY.md)。登录密码、会话密钥和真实上传 Token 只保存在服务器，不会提交到 Git 仓库。
+
+Windows CSV 上传脚本为 [upload-csv.ps1](upload-csv.ps1)，使用方式、文件名映射和专用 API 说明见 [CSV-UPLOAD.md](CSV-UPLOAD.md)。

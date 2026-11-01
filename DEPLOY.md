@@ -8,7 +8,7 @@
 - Nginx：监听公网 `16025`
 - systemd：`/etc/systemd/system/MyDrive.service`
 - Nginx：`/etc/nginx/sites-available/MyDrive`
-- 私密环境变量：`/etc/mydrive.env`（权限 `600`，包含 Kaggle 上传 Token）
+- 私密环境变量：`/etc/mydrive.env`（权限 `600`，包含 Kaggle / CSV 上传 Token）
 
 以下命令均使用 `root` 用户，不需要 `sudo`。
 
@@ -60,7 +60,7 @@ chmod +x deploy/install.sh
 
 1. 安装生产依赖。
 2. 创建文件与临时上传目录。
-3. 首次运行时询问登录密码，并自动生成会话密钥和 Kaggle 上传 Token。
+3. 首次运行时询问登录密码，并自动生成会话密钥、Kaggle 上传 Token 和独立 CSV 上传 Token；已有配置不覆盖。
 4. 创建 `/etc/mydrive.env`，权限为 `600`。
 5. 安装并启用 systemd 服务。
 6. 安装并启用 Nginx 配置。
@@ -88,10 +88,11 @@ read -r -s -p "MyDrive 登录密码: " MYDRIVE_LOGIN_PASSWORD
 echo
 SESSION_SECRET_VALUE="$(openssl rand -hex 48)"
 KAGGLE_UPLOAD_TOKEN_VALUE="$(openssl rand -hex 32)"
+CSV_UPLOAD_TOKEN_VALUE="$(openssl rand -hex 32)"
 umask 077
-printf 'APP_USERNAME=noart\nAPP_PASSWORD=%s\nSESSION_SECRET=%s\nKAGGLE_UPLOAD_TOKEN=%s\nSTORAGE_ROOT=/opt/MyDrive/data/uploads\nTEMP_ROOT=/opt/MyDrive/data/tmp\nMAX_UPLOAD_BYTES=107374182400\nMAX_UPLOAD_FILES=20\nREQUEST_TIMEOUT_MS=86400000\nCOOKIE_SECURE=false\n' \
-  "$MYDRIVE_LOGIN_PASSWORD" "$SESSION_SECRET_VALUE" "$KAGGLE_UPLOAD_TOKEN_VALUE" > /etc/mydrive.env
-unset MYDRIVE_LOGIN_PASSWORD SESSION_SECRET_VALUE KAGGLE_UPLOAD_TOKEN_VALUE
+printf 'APP_USERNAME=noart\nAPP_PASSWORD=%s\nSESSION_SECRET=%s\nKAGGLE_UPLOAD_TOKEN=%s\nCSV_UPLOAD_TOKEN=%s\nSTORAGE_ROOT=/opt/MyDrive/data/uploads\nTEMP_ROOT=/opt/MyDrive/data/tmp\nMAX_UPLOAD_BYTES=107374182400\nMAX_UPLOAD_FILES=20\nREQUEST_TIMEOUT_MS=86400000\nCOOKIE_SECURE=false\n' \
+  "$MYDRIVE_LOGIN_PASSWORD" "$SESSION_SECRET_VALUE" "$KAGGLE_UPLOAD_TOKEN_VALUE" "$CSV_UPLOAD_TOKEN_VALUE" > /etc/mydrive.env
+unset MYDRIVE_LOGIN_PASSWORD SESSION_SECRET_VALUE KAGGLE_UPLOAD_TOKEN_VALUE CSV_UPLOAD_TOKEN_VALUE
 chmod 600 /etc/mydrive.env
 ```
 
@@ -190,3 +191,7 @@ nginx -t && systemctl reload nginx
 ```
 
 定期备份这个目录即可。不要把该目录提交到 Git。
+
+## 8. Windows CSV 批量上传
+
+使用仓库根目录的 `upload-csv.ps1`，支持递归查找 CSV、自定义目标目录和文件名扁平化。详见 [CSV-UPLOAD.md](CSV-UPLOAD.md)。已有部署升级时运行一次 `bash deploy/install.sh`，它会补充独立的 `CSV_UPLOAD_TOKEN` 并重启服务，不改变原有 Kaggle Token 的权限。
