@@ -1,23 +1,22 @@
-#Requires -Version 5.1
-<#
-Recursively upload CSV files without changing local files.
-Example:
-  .\upload-csv.ps1 -LocalDirectory 'D:\runs' -ServerDirectory 'results' -ServerUrl 'http://192.168.0.150:16025'
-Use -Preview to list the planned uploads without sending anything.
-Token: MYDRIVE_CSV_TOKEN environment variable, -Token, or a hidden prompt.
-ServerDirectory is a path INSIDE MyDrive, not a server filesystem path.
-#>
-[CmdletBinding()]
-param(
-    [string]$LocalDirectory = 'runs',
-    [string]$ServerDirectory = 'results',
-    [Parameter(Mandatory = $true)]
-    [string]$ServerUrl,
-    [string]$Token = $env:MYDRIVE_CSV_TOKEN,
-    [ValidateRange(1, 86400)]
-    [int]$TimeoutSeconds = 3600,
-    [switch]$Preview
-)
+﻿#Requires -Version 5.1
+# 修改下面的配置，然后直接运行本脚本，不需要命令行参数。
+# 使用 Windows PowerShell 5.1 时，请保留 UTF-8 BOM 编码，以支持中文配置。
+
+# ==================== CONFIGURATION BEGIN ====================
+# 本地目录：建议填写绝对路径，例如 D:\runs。
+$LocalDirectory = 'D:\runs'
+# 网盘内的目标目录，例如 results 或 results/experiment1。
+$ServerDirectory = 'results'
+# 替换为你实际可以访问的网盘地址，端口仍为 16025。
+$ServerUrl = 'http://192.168.0.150:16025'
+# 只填写 CSV_UPLOAD_TOKEN= 后面的值，不要填 Kaggle Token 或整行配置。
+# 填入真实 Token 的脚本请仅保存在自己的电脑，不要上传到公开仓库。
+$Token = 'PASTE_YOUR_CSV_UPLOAD_TOKEN_HERE'
+# 每个文件的上传超时（秒），范围为 1 到 86400。
+$TimeoutSeconds = 3600
+# true：只预览文件清单，不上传；false：正式上传。
+$Preview = $false
+# ===================== CONFIGURATION END =====================
 
 $ErrorActionPreference = 'Stop'
 
@@ -39,6 +38,9 @@ function Get-CsvFiles {
 }
 
 try {
+    if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 86400) {
+        throw 'TimeoutSeconds must be between 1 and 86400.'
+    }
     $root = Get-Item -LiteralPath $LocalDirectory -Force
     if (-not $root.PSIsContainer -or ($root.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
         throw 'LocalDirectory must be a real directory, not a file, junction or symbolic link.'
@@ -67,17 +69,9 @@ try {
         exit 0
     }
 
-    if ([string]::IsNullOrWhiteSpace($Token)) {
-        $secureToken = Read-Host 'CSV_UPLOAD_TOKEN (input is hidden)' -AsSecureString
-        $tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
-        try {
-            $Token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer)
-        } finally {
-            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer)
-            $secureToken.Dispose()
-        }
+    if ([string]::IsNullOrWhiteSpace($Token) -or $Token -eq 'PASTE_YOUR_CSV_UPLOAD_TOKEN_HERE') {
+        throw 'Set Token in the configuration section to the value of CSV_UPLOAD_TOKEN.'
     }
-    if ([string]::IsNullOrWhiteSpace($Token)) { throw 'CSV_UPLOAD_TOKEN cannot be empty.' }
     if ($baseUri.Scheme -eq 'http') {
         Write-Warning 'HTTP does not encrypt the token or files. Use a trusted LAN/VPN or HTTPS.'
     }

@@ -29,35 +29,47 @@ grep '^CSV_UPLOAD_TOKEN=' /etc/mydrive.env
 
 CSV Token 只允许通过专用接口上传 CSV，可以指定网盘内的任意子目录，但不能读取、删除或覆盖文件。原来的 Kaggle Token 仍只能上传到 `/kaggle/`。请把两个 Token 都当作密码保管，不要提交到 GitHub 或分享脚本运行日志中的私密配置。
 
-## 2. 下载脚本并执行
+## 2. 在脚本内配置，然后直接运行
 
 把仓库根目录的 `upload-csv.ps1` 保存到 Windows 电脑，例如 `D:\tools\upload-csv.ps1`。脚本按 Windows PowerShell 5.1 / PowerShell 7 的语法编写。
 
-打开 PowerShell，执行（地址换成你当前能访问的网盘地址）：
+用文本编辑器打开脚本，修改文件顶部的配置区。地址换成你当前能访问的网盘地址，Token 填入上一步复制的值：
 
 ```powershell
-cd D:\tools
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\upload-csv.ps1 -LocalDirectory "D:\runs" -ServerDirectory "results" -ServerUrl "http://192.168.0.150:16025"
+$LocalDirectory = 'D:\runs'
+$ServerDirectory = 'results'
+$ServerUrl = 'http://192.168.0.150:16025'
+$Token = '在这里填写CSV_UPLOAD_TOKEN的值'
+$TimeoutSeconds = 3600
+$Preview = $false
 ```
 
-按提示粘贴服务器的 `CSV_UPLOAD_TOKEN` 并回车。输入时不会显示 Token。`-ExecutionPolicy Bypass` 仅对这次新启动的 PowerShell 进程生效，不修改系统执行策略。如果使用 PowerShell 7，也可将 `powershell.exe` 换成 `pwsh.exe`。
+保存后在脚本所在目录打开 PowerShell，直接运行，不需要传入任何配置参数，也不会再提示输入 Token：
 
-- `LocalDirectory`：本地目录，支持绝对路径、相对路径、空格和中文；默认 `runs`。
+```powershell
+.\upload-csv.ps1
+```
+
+若系统执行策略阻止运行，可使用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\upload-csv.ps1`，这只影响本次 PowerShell 进程；本地目录、地址、Token 等仍全部在脚本内配置。
+
+- `LocalDirectory`：本地目录，支持空格和中文；建议填写绝对路径，默认示例为 `D:\runs`。相对路径以 PowerShell 当前工作目录为基准。
 - `ServerDirectory`：**网盘里的目录**，例如 `results` 或 `results/experiment1`；默认 `results`，不存在会自动创建。不是服务器操作系统路径，不要填写 `/opt/MyDrive/...`。
-- `ServerUrl`：必填，例如 `http://192.168.0.150:16025`。`192.168.0.150` 是局域网地址，电脑必须能通过同一局域网或 VPN 访问它；也可以填写实际公网地址或 HTTPS 地址。
-- `TimeoutSeconds`：每个文件的上传超时，默认 3600 秒，最长 86400 秒。例如添加 `-TimeoutSeconds 7200`。
+- `ServerUrl`：填写正确的网盘地址，例如 `http://192.168.0.150:16025`。`192.168.0.150` 是局域网地址，电脑必须能通过同一局域网或 VPN 访问它；也可以填写实际公网地址或 HTTPS 地址。
+- `Token`：填写 `CSV_UPLOAD_TOKEN=` 后面的值，不要填写整个配置行，也不要使用 Kaggle Token。
+- `TimeoutSeconds`：每个文件的上传超时，默认 3600 秒，最长 86400 秒。
+- `Preview`：设置为 `$true` 只预览，设置为 `$false` 正式上传。
 
-如需在当前终端会话多次使用，也可设置 `$env:MYDRIVE_CSV_TOKEN`；脚本会优先读取它，不再提示输入。脚本支持 `-Token` 参数，但不建议在命令行直接写真实 Token，以免进入命令历史或进程参数。
+脚本不再从命令行参数或环境变量读取配置。填有真实 Token 的版本仅在自己的电脑保存，不要上传到 GitHub 或分享给他人。脚本使用 UTF-8 BOM 编码，修改中文路径后请保留该编码，以兼容 Windows PowerShell 5.1。
 
 ## 3. 先预览，不上传
 
-在同一个命令末尾加 `-Preview`，只列出文件名转换结果，不需要 Token，也不会发送网络请求：
+将脚本顶部的 `$Preview` 改为 `$true`，只列出文件名转换结果，不需要 Token，也不会发送网络请求：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\upload-csv.ps1 -LocalDirectory "D:\runs" -ServerDirectory "results" -ServerUrl "http://192.168.0.150:16025" -Preview
+$Preview = $true
 ```
 
-确认列表后移除 `-Preview` 再执行。正常上传会显示文件数量、当前文件进度、实际保存位置和最终成功/失败统计：
+确认列表后改回 `$false` 再运行脚本。正常上传会显示文件数量、当前文件进度、实际保存位置和最终成功/失败统计：
 
 ```text
 Found 2 CSV file(s) in D:\runs

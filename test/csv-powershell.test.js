@@ -44,14 +44,23 @@ async function fixture(context, { maxUploadBytes = 1024, redirect = false } = {}
   return { root, local, storage, url: `http://127.0.0.1:${server.address().port}`, redirectedRequests: () => redirectedRequests };
 }
 
-function runScript(f, { token = TOKEN, preview = false, target = 'results' } = {}) {
-  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
-    path.join(__dirname, '..', 'upload-csv.ps1'), '-LocalDirectory', f.local,
-    '-ServerDirectory', target, '-ServerUrl', f.url, '-TimeoutSeconds', '10'];
-  if (preview) args.push('-Preview');
+async function runScript(f, { token = TOKEN, preview = false, target = 'results' } = {}) {
+  let script = await fs.readFile(path.join(__dirname, '..', 'upload-csv.ps1'), 'utf8');
+  const psString = (value) => `'${value.replaceAll("'", "''")}'`;
+  const config = {
+    LocalDirectory: psString(f.local), ServerDirectory: psString(target),
+    ServerUrl: psString(f.url), Token: psString(token), TimeoutSeconds: '10',
+    Preview: preview ? '$true' : '$false'
+  };
+  for (const [name, value] of Object.entries(config)) {
+    script = script.replace(new RegExp(`^\\$${name} = .*`, 'm'), () => `$${name} = ${value}`);
+  }
+  const configuredScript = path.join(f.root, 'upload-csv.ps1');
+  await fs.writeFile(configuredScript, script);
+  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', configuredScript];
   return new Promise((resolve) => {
     execFile(powershell, args, {
-      env: { ...process.env, MYDRIVE_CSV_TOKEN: token }, timeout: 20_000, encoding: 'utf8'
+      timeout: 20_000, encoding: 'utf8'
     }, (error, stdout, stderr) => resolve({ code: error?.code || 0, stdout, stderr }));
   });
 }
@@ -131,4 +140,13 @@ test('PowerShell never follows an upload redirect', runtimeOptions, async (conte
   assert.equal(result.code, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /HTTP 307/);
   assert.equal(f.redirectedRequests(), 0);
+});
+
+test('PowerShell requires Token in the script configuration without prompting for input', runtimeOptions, async (context) => {
+  const f = await fixture(context);
+  await fs.writeFile(path.join(f.local, 'a.csv'), 'csv');
+  const result = await runScript(f, { token: 'PASTE_YOUR_CSV_UPLOAD_TOKEN_HERE' });
+  assert.equal(result.code, 2, result.stdout + result.stderr);
+  assert.match(result.stdout, /Set Token in the configuration section/);
+  assert.deepEqual(await fs.readdir(f.storage), []);
 });
