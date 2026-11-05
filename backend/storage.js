@@ -185,6 +185,41 @@ async function prepareBatchItems(root, paths, limit = 500) {
   ));
 }
 
+// Reject symlinks in any component, including a link in a parent folder.
+async function resolveDownloadPath(canonicalRoot, virtualPath) {
+  const absolutePath = resolveVirtualPath(canonicalRoot, virtualPath);
+  const realPath = await fs.realpath(absolutePath).catch((error) => {
+    if (['ENOENT', 'ENOTDIR', 'ELOOP'].includes(error.code)) {
+      throw createStorageError('文件或文件夹不存在', 'NOT_FOUND');
+    }
+    throw error;
+  });
+  if (realPath !== absolutePath) throw createStorageError('不能下载符号链接', 'INVALID_ITEM');
+  return absolutePath;
+}
+
+async function prepareDownloadFiles(root, paths) {
+  const canonicalRoot = await fs.realpath(root);
+  const selected = await prepareBatchItems(canonicalRoot, paths);
+  const pending = selected.map((item) => ({ path: item.normalizedPath, folder: item.stats.isDirectory() }));
+  const files = [];
+  for (let i = 0; i < pending.length; i += 1) {
+    const item = pending[i];
+    const absolutePath = await resolveDownloadPath(canonicalRoot, item.path);
+    if (!item.folder) {
+      files.push({ name: path.posix.basename(item.path), path: item.path });
+      continue;
+    }
+    const children = await fs.readdir(absolutePath, { withFileTypes: true });
+    for (const child of children) {
+      if (child.isFile() || child.isDirectory()) {
+        pending.push({ path: joinVirtualPath(item.path, child.name), folder: child.isDirectory() });
+      }
+    }
+  }
+  return files;
+}
+
 async function requireDestinationDirectory(root, virtualPath) {
   const normalizedPath = normalizeVirtualPath(virtualPath);
   const absolutePath = resolveVirtualPath(root, normalizedPath);
@@ -266,7 +301,9 @@ module.exports = {
   normalizeVirtualPath,
   parentVirtualPath,
   prepareBatchItems,
+  prepareDownloadFiles,
   renameItem,
+  resolveDownloadPath,
   resolveVirtualPath,
   sanitizeUploadName,
   searchItems,

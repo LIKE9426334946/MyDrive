@@ -7,7 +7,7 @@
   <meta name="description" content="MyDrive 私人网盘">
   <title>MyDrive · 私人网盘</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=original-downloads">
 </head>
 <body>
   <section id="login-view" class="login-view" aria-labelledby="login-title">
@@ -109,7 +109,7 @@
         <div class="selection-actions">
           <button id="batch-download-button" class="button button-secondary button-compact" type="button" disabled>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 20h14"/></svg>
-            <span>下载</span>
+            <span>下载原文件</span>
           </button>
           <button id="batch-delete-button" class="button button-danger button-compact" type="button" disabled>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
@@ -118,6 +118,15 @@
           <button id="selection-cancel-button" class="button button-ghost button-compact" type="button">取消</button>
         </div>
       </div>
+
+      <section id="download-panel" class="download-panel" aria-labelledby="download-summary" hidden>
+        <div>
+          <strong id="download-summary" role="status"></strong>
+          <button id="download-close" class="button button-ghost button-compact" type="button" title="关闭清单，停止发起后续下载">关闭清单</button>
+        </div>
+        <p>如果浏览器询问，请允许下载多个文件。未开始的文件也可以点击下面的链接单独下载。</p>
+        <ul id="download-links"></ul>
+      </section>
 
       <section id="drop-zone" class="file-panel" aria-label="文件列表">
         <div id="drop-overlay" class="drop-overlay" hidden>
@@ -232,6 +241,6 @@
   </dialog>
 
   <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-  <script src="/app.js" defer></script>
+  <script src="/app.js?v=original-downloads" defer></script>
 </body>
 </html>

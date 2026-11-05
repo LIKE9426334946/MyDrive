@@ -15,6 +15,8 @@ const state = {
   moveRequestSequence: 0,
   selectionMode: false,
   selectedPaths: new Set(),
+  downloadBatchId: 0,
+  sendingDownloads: false,
   dragDepth: 0
 };
 
@@ -46,6 +48,10 @@ const elements = {
   selectAllCheckbox: document.querySelector('#select-all-checkbox'),
   selectionCount: document.querySelector('#selection-count'),
   batchDownloadButton: document.querySelector('#batch-download-button'),
+  downloadPanel: document.querySelector('#download-panel'),
+  downloadSummary: document.querySelector('#download-summary'),
+  downloadLinks: document.querySelector('#download-links'),
+  downloadClose: document.querySelector('#download-close'),
   batchDeleteButton: document.querySelector('#batch-delete-button'),
   selectionCancelButton: document.querySelector('#selection-cancel-button'),
   listHeader: document.querySelector('#list-header'),
@@ -132,6 +138,7 @@ function showLogin() {
   state.authenticated = false;
   state.selectionMode = false;
   state.selectedPaths.clear();
+  closeDownloadList();
   elements.selectionToolbar.hidden = true;
   elements.driveView.hidden = true;
   elements.loginView.hidden = false;
@@ -231,11 +238,15 @@ function openItem(item) {
   }
 }
 
-function downloadItem(item) {
-  const url = `/api/download?path=${encodeURIComponent(item.path)}`;
+function makeDownloadLink(item) {
   const anchor = document.createElement('a');
-  anchor.href = url;
+  anchor.href = `/api/download?path=${encodeURIComponent(item.path)}`;
   anchor.download = item.name;
+  return anchor;
+}
+
+function downloadItem(item) {
+  const anchor = makeDownloadLink(item);
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
@@ -251,7 +262,7 @@ function updateSelectionUi() {
   elements.selectionCount.textContent = `已选 ${count} 项`;
   elements.selectAllCheckbox.checked = allSelected;
   elements.selectAllCheckbox.indeterminate = count > 0 && !allSelected;
-  elements.batchDownloadButton.disabled = count === 0;
+  elements.batchDownloadButton.disabled = count === 0 || state.sendingDownloads;
   elements.batchDeleteButton.disabled = count === 0;
 }
 
@@ -267,25 +278,64 @@ function toggleItemSelection(itemPath, selected) {
   renderItems(state.items);
 }
 
+function closeDownloadList() {
+  state.downloadBatchId += 1;
+  state.sendingDownloads = false;
+  elements.downloadPanel.hidden = true;
+  elements.downloadLinks.replaceChildren();
+  updateSelectionUi();
+}
+
 async function downloadSelectedItems() {
-  const paths = selectedItems().map((item) => item.path);
-  if (!paths.length) return;
-  elements.batchDownloadButton.disabled = true;
+  const items = selectedItems();
+  if (!items.length || state.sendingDownloads) return;
+  closeDownloadList();
+  if (items.length === 1 && items[0].kind === 'file') {
+    downloadItem(items[0]);
+    return;
+  }
+  const batchId = state.downloadBatchId;
+  state.sendingDownloads = true;
+  updateSelectionUi();
   try {
-    const payload = await api('/api/items/archive', {
+    // The ordinary files-only case can start its first download during the
+    // original click. Only ask the server for a manifest when expanding folders.
+    const files = items.every((item) => item.kind === 'file') ? items : (await api('/api/items/downloads', {
       method: 'POST',
-      body: JSON.stringify({ paths })
+      body: JSON.stringify({ paths: items.map((item) => item.path) })
+    })).files;
+    if (batchId !== state.downloadBatchId) return;
+    if (files.length === 0) {
+      showToast('所选文件夹内没有可下载的文件');
+      return;
+    }
+    const list = document.createDocumentFragment();
+    const links = files.map((file) => {
+      const anchor = makeDownloadLink(file);
+      anchor.textContent = file.path;
+      const row = document.createElement('li');
+      row.append(anchor);
+      list.append(row);
+      return anchor;
     });
-    const anchor = document.createElement('a');
-    anchor.href = payload.downloadUrl;
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    showToast(`正在打包下载 ${paths.length} 个项目`);
+    elements.downloadLinks.replaceChildren(list);
+    elements.downloadPanel.hidden = false;
+    // Give each native download its own navigation; never fetch large files
+    // into JavaScript memory. Links stay usable if automatic downloads are blocked.
+    for (const [index, link] of links.entries()) {
+      if (batchId !== state.downloadBatchId) return;
+      elements.downloadSummary.textContent = `正在请求下载原文件（${index + 1}/${links.length}）`;
+      link.click();
+      if (index < links.length - 1) await new Promise((resolve) => window.setTimeout(resolve, 200));
+    }
+    elements.downloadSummary.textContent = `已请求下载 ${links.length} 个原文件`;
   } catch (error) {
-    showToast(error.message, 'error');
+    if (batchId === state.downloadBatchId) showToast(error.message, 'error');
   } finally {
-    updateSelectionUi();
+    if (batchId === state.downloadBatchId) {
+      state.sendingDownloads = false;
+      updateSelectionUi();
+    }
   }
 }
 
@@ -828,6 +878,7 @@ elements.selectAllCheckbox.addEventListener('change', () => {
   renderItems(state.items);
 });
 elements.batchDownloadButton.addEventListener('click', downloadSelectedItems);
+elements.downloadClose.addEventListener('click', closeDownloadList);
 elements.batchDeleteButton.addEventListener('click', askBatchDelete);
 
 elements.newFolderButton.addEventListener('click', () => {

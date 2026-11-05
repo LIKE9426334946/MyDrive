@@ -1,7 +1,6 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { spawn } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const express = require('express');
@@ -21,9 +20,10 @@ const {
   listDirectory,
   moveItem,
   normalizeVirtualPath,
-  parentVirtualPath,
   prepareBatchItems,
+  prepareDownloadFiles,
   renameItem,
+  resolveDownloadPath,
   resolveVirtualPath,
   searchItems,
   validateItemName
@@ -43,7 +43,6 @@ const MAX_UPLOAD_BYTES = Number.parseInt(process.env.MAX_UPLOAD_BYTES || String(
 const MAX_UPLOAD_FILES = Number.parseInt(process.env.MAX_UPLOAD_FILES || '20', 10);
 const REQUEST_TIMEOUT_MS = Number.parseInt(process.env.REQUEST_TIMEOUT_MS || String(24 * 60 * 60 * 1000), 10);
 const SESSION_COOKIE = 'mydrive_session';
-const ARCHIVE_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 if (!APP_PASSWORD) throw new Error('APP_PASSWORD 环境变量未设置');
 if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
@@ -60,7 +59,6 @@ if (!Number.isSafeInteger(REQUEST_TIMEOUT_MS) || REQUEST_TIMEOUT_MS < 300_000) {
 const app = express();
 const publicRoot = path.join(__dirname, '..', 'public');
 const loginAttempts = new Map();
-const archiveDownloads = new Map();
 
 app.disable('x-powered-by');
 app.set('trust proxy', 'loopback');
@@ -142,13 +140,6 @@ setInterval(() => {
     if (state.resetAt <= now && state.blockedUntil <= now) loginAttempts.delete(ip);
   }
 }, 15 * 60 * 1000).unref();
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, download] of archiveDownloads) {
-    if (download.expiresAt <= now) archiveDownloads.delete(token);
-  }
-}, 60 * 1000).unref();
 
 app.get('/api/health', (request, response) => {
   response.json({ status: 'ok' });
@@ -366,7 +357,7 @@ app.get('/api/download', async (request, response, next) => {
       response.status(400).json({ error: '请选择需要下载的文件', code: 'INVALID_PATH' });
       return;
     }
-    const absolutePath = resolveVirtualPath(STORAGE_ROOT, virtualPath);
+    const absolutePath = await resolveDownloadPath(await fs.realpath(STORAGE_ROOT), virtualPath);
     const stats = await fs.lstat(absolutePath).catch((error) => {
       if (error.code === 'ENOENT') return null;
       throw error;
@@ -384,63 +375,10 @@ app.get('/api/download', async (request, response, next) => {
   }
 });
 
-app.post('/api/items/archive', requireSameOriginWrite, async (request, response) => {
-  const items = await prepareBatchItems(STORAGE_ROOT, request.body?.paths);
-  const token = crypto.randomBytes(24).toString('base64url');
-  archiveDownloads.set(token, {
-    username: request.session.username,
-    paths: items.map((item) => item.normalizedPath),
-    expiresAt: Date.now() + ARCHIVE_TOKEN_TTL_MS
-  });
-  response.status(201).json({ downloadUrl: `/api/items/archive/${token}` });
-});
-
-app.get('/api/items/archive/:token', async (request, response, next) => {
-  const download = archiveDownloads.get(request.params.token);
-  archiveDownloads.delete(request.params.token);
-  if (!download || download.expiresAt <= Date.now() || download.username !== request.session.username) {
-    response.status(404).json({ error: '批量下载链接已失效，请重新操作', code: 'NOT_FOUND' });
-    return;
-  }
-
-  try {
-    const items = await prepareBatchItems(STORAGE_ROOT, download.paths);
-    const parentPaths = new Set(items.map((item) => parentVirtualPath(item.normalizedPath)));
-    const commonParent = parentPaths.size === 1 ? [...parentPaths][0] : '';
-    const archiveRoot = resolveVirtualPath(STORAGE_ROOT, commonParent);
-    const archivePaths = items.map((item) => commonParent
-      ? item.normalizedPath.slice(commonParent.length + 1)
-      : item.normalizedPath);
-    const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-
-    response.set({
-      'Cache-Control': 'private, no-store',
-      'Content-Disposition': `attachment; filename="MyDrive_${stamp}.tar.gz"`,
-      'Content-Type': 'application/gzip'
-    });
-
-    const archive = spawn('tar', ['-czf', '-', '-C', archiveRoot, '--', ...archivePaths], {
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    let archiveError = '';
-    archive.stderr.setEncoding('utf8');
-    archive.stderr.on('data', (chunk) => { archiveError = `${archiveError}${chunk}`.slice(-2000); });
-    archive.once('error', (error) => {
-      if (!response.headersSent) next(error);
-      else response.destroy(error);
-    });
-    archive.once('close', (code) => {
-      if (code !== 0 && !response.destroyed) {
-        response.destroy(new Error(archiveError.trim() || `tar exited with code ${code}`));
-      }
-    });
-    response.once('close', () => {
-      if (!archive.killed) archive.kill();
-    });
-    archive.stdout.pipe(response);
-  } catch (error) {
-    next(error);
-  }
+app.post('/api/items/downloads', requireSameOriginWrite, async (request, response) => {
+  const files = await prepareDownloadFiles(STORAGE_ROOT, request.body?.paths);
+  response.setHeader('Cache-Control', 'private, no-store');
+  response.json({ files });
 });
 
 app.patch('/api/items/rename', requireSameOriginWrite, async (request, response) => {

@@ -5,7 +5,7 @@
 # ==================== CONFIGURATION BEGIN ====================
 # 本地目录：建议填写绝对路径，例如 D:\runs。
 $LocalDirectory = 'D:\runs'
-# 网盘内的目标目录，例如 results 或 results/experiment1。
+# 网盘内的目标目录。新版服务会替换该目录中的同名 CSV，不再自动编号。
 $ServerDirectory = 'results'
 # 替换为你实际可以访问的网盘地址，端口仍为 16025。
 $ServerUrl = 'http://192.168.0.150:16025'
@@ -128,7 +128,8 @@ try {
                     throw $reason
                 }
                 $succeeded += 1
-                Write-Host ('Upload success: {0} -> {1}' -f $relative, $reply.path) -ForegroundColor Green
+                $note = if ($reply.replaced) { ' (replaced)' } else { '' }
+                Write-Host ('Upload success: {0} -> {1}{2}' -f $relative, $reply.path, $note) -ForegroundColor Green
             } catch {
                 $failed += 1
                 Write-Host ('Upload failed: {0} - {1}' -f $relative, $_.Exception.Message) -ForegroundColor Red

@@ -1,7 +1,6 @@
 'use strict';
 
 const fs = require('node:fs/promises');
-const { constants } = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const multer = require('multer');
@@ -26,30 +25,46 @@ async function ensureCsvDirectory(storageRoot, virtualPath) {
   return directory;
 }
 
-async function saveCsvWithoutOverwrite(temporaryPath, directory, filename) {
-  const parsed = path.parse(filename);
-  for (let index = 0; index < 10_000; index += 1) {
-    const suffix = index === 0 ? '' : `_${index}`;
-    let stem = parsed.name;
-    while (Buffer.byteLength(`${stem}${suffix}${parsed.ext}`, 'utf8') > 255) {
-      stem = Array.from(stem).slice(0, -1).join('');
-    }
-    const name = `${stem}${suffix}${parsed.ext}`;
-    const destination = path.join(directory, name);
+// Atomically publish complete files. Do not truncate a readable destination in place.
+async function publishCsv(stagedPath, destination) {
+  for (;;) {
     try {
-      try {
-        // Exclusive hard-link creation also handles concurrent uploads safely.
-        await fs.link(temporaryPath, destination);
-      } catch (error) {
-        if (error.code !== 'EXDEV') throw error;
-        await fs.copyFile(temporaryPath, destination, constants.COPYFILE_EXCL);
-      }
-      return name;
+      await fs.link(stagedPath, destination);
+      return false; // Newly created; no previous file was replaced.
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
     }
+    const existing = await fs.lstat(destination).catch((error) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (!existing) continue;
+    if (!existing.isFile()) {
+      throw createStorageError('同名目标不是普通文件，不能替换', 'NAME_CONFLICT');
+    }
+    await fs.rename(stagedPath, destination);
+    return true;
   }
-  throw createStorageError('同名文件过多，请换一个文件名', 'NAME_CONFLICT');
+}
+
+async function saveCsv(temporaryPath, directory, filename) {
+  const destination = path.join(directory, filename);
+  try {
+    return await publishCsv(temporaryPath, destination);
+  } catch (error) {
+    if (error.code !== 'EXDEV') throw error;
+  }
+
+  // TEMP_ROOT can be on another mount. Complete the copy on the destination
+  // filesystem before publishing; an interrupted copy leaves the old CSV intact.
+  const stage = await fs.mkdtemp(path.join(directory, '.mydrive-csv-'));
+  try {
+    const stagedPath = path.join(stage, 'upload');
+    await fs.copyFile(temporaryPath, stagedPath);
+    return await publishCsv(stagedPath, destination);
+  } finally {
+    await fs.rm(stage, { recursive: true, force: true });
+  }
 }
 
 function createCsvUploadRouter({ token, storageRoot, tempRoot, maxUploadBytes }) {
@@ -104,17 +119,19 @@ function createCsvUploadRouter({ token, storageRoot, tempRoot, maxUploadBytes })
     try {
       const target = request.csvTarget;
       const directory = await ensureCsvDirectory(storageRoot, target.path);
-      const filename = await saveCsvWithoutOverwrite(request.file.path, directory, target.filename);
+      const filename = target.filename;
+      const replaced = await saveCsv(request.file.path, directory, filename);
       stored = {
         status: 'success',
         filename,
         path: `${target.path}/${filename}`,
-        size: request.file.size
+        size: request.file.size,
+        replaced
       };
     } finally {
       await fs.rm(request.file.path, { force: true });
     }
-    response.status(201).json(stored);
+    response.status(stored.replaced ? 200 : 201).json(stored);
   });
 
   router.use((error, request, response, next) => {

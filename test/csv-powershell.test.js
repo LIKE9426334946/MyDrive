@@ -94,21 +94,31 @@ test('PowerShell recursively previews/uploads CSVs, flattens paths and preserves
   assert.deepEqual(await fs.readdir(f.storage), []);
 
   await fs.mkdir(path.join(f.storage, target), { recursive: true });
-  await fs.writeFile(path.join(f.storage, target, 'metrics.csv'), 'keep-original');
+  await fs.writeFile(path.join(f.storage, target, 'metrics.csv'), 'old metrics');
   const uploaded = await runScript(f, { target });
   assert.equal(uploaded.code, 0, uploaded.stdout + uploaded.stderr);
   assert.match(uploaded.stdout, /Success: 6; Failed: 0; Not attempted: 0/);
   const savedNames = await fs.readdir(path.join(f.storage, target));
   assert.deepEqual(savedNames.sort(), [
-    '.hidden_trace.csv', 'abc_ab.csv', 'abc_ab_1.csv', 'abc_deep_metrics.CSV',
-    'metrics.csv', 'metrics_1.csv', '实验 空间_成绩.csv'
+    '.hidden_trace.csv', 'abc_ab.csv', 'abc_deep_metrics.CSV', 'metrics.csv', '实验 空间_成绩.csv'
   ].sort());
-  const savedContents = await Promise.all(savedNames.map((name) => fs.readFile(path.join(f.storage, target, name), 'utf8')));
-  assert.deepEqual(savedContents.sort(), [...Object.entries(files).filter(([name]) => /\.csv$/i.test(name)).map(([, value]) => value), 'keep-original'].sort());
-  assert.equal(await fs.readFile(path.join(f.storage, target, 'metrics.csv'), 'utf8'), 'keep-original');
+  const readSaved = (name) => fs.readFile(path.join(f.storage, target, name), 'utf8');
+  assert.equal(await readSaved('metrics.csv'), files['metrics.csv']);
+  assert.equal(await readSaved('实验 空间_成绩.csv'), files['实验 空间/成绩.csv']);
+  assert.equal(await readSaved('.hidden_trace.csv'), files['.hidden/trace.csv']);
+  assert.equal(await readSaved('abc_deep_metrics.CSV'), files['abc/deep/metrics.CSV']);
+  const lastCollision = uploaded.stdout.split(/\r?\n/).filter((line) => /^Upload success: .*\/abc_ab\.csv(?: |$)/.test(line)).at(-1);
+  assert.ok(lastCollision);
+  assert.equal(await readSaved('abc_ab.csv'), lastCollision.startsWith('Upload success: abc_ab.csv ') ? files['abc_ab.csv'] : files['abc/ab.csv']);
+  assert.match(uploaded.stdout, /metrics\.csv \(replaced\)/);
   for (const [relative, content] of Object.entries(files)) {
     assert.equal(await fs.readFile(path.join(f.local, relative), 'utf8'), content);
   }
+  await fs.writeFile(path.join(f.local, 'metrics.csv'), 'updated run');
+  const repeated = await runScript(f, { target });
+  assert.equal(repeated.code, 0, repeated.stdout + repeated.stderr);
+  assert.equal(await readSaved('metrics.csv'), 'updated run');
+  assert.deepEqual((await fs.readdir(path.join(f.storage, target))).sort(), savedNames);
 });
 
 test('PowerShell stops on invalid token without uploading remaining files', runtimeOptions, async (context) => {

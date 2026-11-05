@@ -27,7 +27,7 @@ grep '^CSV_UPLOAD_TOKEN=' /etc/mydrive.env
 
 部署脚本自动生成独立的 `CSV_UPLOAD_TOKEN` 并重启服务。已存在的 CSV Token、Kaggle Token 和登录密码保持不变；仍使用外部端口 `16025`、内部端口 `3025`。复制最后一行**等号后面的值**，不要复制 `CSV_UPLOAD_TOKEN=` 前缀。
 
-CSV Token 只允许通过专用接口上传 CSV，可以指定网盘内的任意子目录，但不能读取、删除或覆盖文件。原来的 Kaggle Token 仍只能上传到 `/kaggle/`。请把两个 Token 都当作密码保管，不要提交到 GitHub 或分享脚本运行日志中的私密配置。
+CSV Token 只允许通过专用接口上传 CSV，可以指定网盘内的任意子目录，并**替换同名 CSV 的内容**，不能用来读取或删除文件。原来的 Kaggle Token 仍只能上传到 `/kaggle/`。请把两个 Token 都当作密码保管，不要提交到 GitHub 或分享脚本运行日志中的私密配置。
 
 ## 2. 在脚本内配置，然后直接运行
 
@@ -80,7 +80,7 @@ Upload success: metrics.csv -> results/metrics.csv
 Finished. Success: 2; Failed: 0; Not attempted: 0
 ```
 
-同名文件会保存为 `abc_ab_1.csv`、`abc_ab_2.csv`，不会覆盖。不同相对路径在扁平化后重名，也按这个规则保存。重复运行会新增副本，不会跳过已上传文件。转换后的文件名超过 255 个 UTF-8 字节时会报告失败；对已合法的文件名追加同名编号时，如有必要会缩短名称末尾，为编号留出空间，保留 `.csv` 扩展名。
+重复运行脚本会更新原路径，例如 `results/abc_ab.csv`。新文件完整上传后才替换旧文件，不会再产生 `_1`、`_2` 副本。此前生成的编号副本不会被自动删除。若两个本地路径转换成同一个文件名（例如 `abc/ab.csv` 和 `abc_ab.csv`），以后一次成功上传的内容为准。需要同时保留两份时请先改名或指定不同目标目录。超过 255 个 UTF-8 字节的文件名会报错。
 
 脚本继续处理普通文件错误；Token 错误或接口未启用时停止后续上传。不会自动重试：超时或断网时服务器可能已经收到文件，应先在网盘中确认，再决定是否重新上传。退出码：`0` 全部成功或没有 CSV，`1` 有文件上传失败，`2` 参数、目录访问或初始化失败。
 
@@ -99,10 +99,10 @@ Content-Type: multipart/form-data; boundary=...
 - 使用磁盘临时文件流式接收，不把整个 CSV 放进内存。大小限制沿用 `MAX_UPLOAD_BYTES`，默认单文件 100GB，Nginx 上传配置不需额外修改。
 - 根据 `.csv` 扩展名筛选，不重新解析或转码 CSV 内容，兼容不同分隔符、编码和空文件。
 
-成功返回 HTTP `201`：
+新增文件返回 HTTP `201`，替换已有文件返回 HTTP `200`。已有的脚本在更新服务端后即使用新的同名策略，无需修改 Token 或传参。
 
 ```json
-{"status":"success","filename":"abc_ab.csv","path":"results/abc_ab.csv","size":123}
+{"status":"success","filename":"abc_ab.csv","path":"results/abc_ab.csv","size":123,"replaced":true}
 ```
 
 错误返回 `{"status":"error","message":"原因"}`，常见状态：
@@ -111,7 +111,7 @@ Content-Type: multipart/form-data; boundary=...
 | --- | --- |
 | `400` | 路径/文件名不合法、不是 CSV、文件字段错误 |
 | `401` | CSV Token 错误或缺失 |
-| `409` | 同名编号耗尽 |
+| `409` | 目标是目录、符号链接等非普通文件，不能替换 |
 | `413` | 文件超过大小限制 |
 | `503` | 服务器未配置 `CSV_UPLOAD_TOKEN` |
 
